@@ -807,6 +807,277 @@ function deleteTopic(id){
 }
 
 /* ════════════════════════════════════
+   STOPWATCH — bulletproof persistence
+
+   Stores the timestamp when started + accumulated seconds.
+   On reopen: elapsed = accumulated + (now - startedAt).
+   Survives force-quit, crashes, tab closes.
+════════════════════════════════════ */
+let swRunning   = false;
+let swSec       = 0;
+let swStartedAt = null;
+let swTimer     = null;
+
+function swSave() {
+  localStorage.setItem('sw_sec',       swSec);
+  localStorage.setItem('sw_startedAt', swRunning ? swStartedAt : '');
+}
+
+function swRestoreState() {
+  const savedSec   = parseInt(localStorage.getItem('sw_sec')       || '0', 10);
+  const savedStart = parseInt(localStorage.getItem('sw_startedAt') || '0', 10);
+  if (savedStart) {
+    swSec = savedSec + Math.floor((Date.now() - savedStart) / 1000);
+    localStorage.setItem('sw_startedAt', '');
+  } else {
+    swSec = savedSec;
+  }
+  if (swSec > 0) {
+    renderSW();
+    if (swSec >= 5) toast('⏱ Restored — ' + fmt(swSec) + ' saved');
+  }
+}
+
+function swTick() { swSec++; renderSW(); }
+
+function renderSW() {
+  const h2 = Math.floor(swSec/3600), m = Math.floor((swSec%3600)/60), s = swSec%60;
+  document.getElementById('swDisplay').textContent = pad(h2)+':'+pad(m)+':'+pad(s);
+}
+
+document.getElementById('swStartStop').onclick = function() {
+  if (!swRunning) {
+    swRunning = true; swStartedAt = Date.now();
+    swTimer = setInterval(swTick, 1000);
+    this.textContent = 'Pause';
+    this.classList.remove('primary'); this.classList.add('danger');
+    document.getElementById('swDisplay').classList.add('running');
+    swSave();
+  } else {
+    swRunning = false;
+    clearInterval(swTimer); swTimer = null;
+    swSec += Math.floor((Date.now() - swStartedAt) / 1000);
+    swStartedAt = null;
+    renderSW(); swSave();
+    this.textContent = 'Resume';
+    this.classList.remove('danger'); this.classList.add('primary');
+    document.getElementById('swDisplay').classList.remove('running');
+  }
+};
+
+document.getElementById('swReset').onclick = function() {
+  swRunning = false;
+  clearInterval(swTimer); swTimer = null;
+  swSec = 0; swStartedAt = null;
+  renderSW(); swSave();
+  const b = document.getElementById('swStartStop');
+  b.textContent = 'Start';
+  b.classList.remove('danger'); b.classList.add('primary');
+  document.getElementById('swDisplay').classList.remove('running');
+};
+
+function logSession() {
+  const total = swRunning
+    ? swSec + Math.floor((Date.now() - swStartedAt) / 1000)
+    : swSec;
+  if (total < 5) { toast('Start the stopwatch first!'); return; }
+  const k = todayKey();
+  data.dailyLog[k] = (data.dailyLog[k] || 0) + total;
+  save(); renderTimer(); toast('✓ Logged ' + fmt(total) + ' to today');
+  document.getElementById('swReset').click();
+}
+
+/* Sync on hide — so startedAt stays accurate */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && swRunning) {
+    const now = Date.now();
+    swSec += Math.floor((now - swStartedAt) / 1000);
+    swStartedAt = now;
+    swSave();
+  }
+});
+window.addEventListener('pagehide', () => {
+  if (swRunning) {
+    const now = Date.now();
+    swSec += Math.floor((now - swStartedAt) / 1000);
+    swStartedAt = now;
+    swSave();
+  }
+});
+
+/* ════════════════════════════════════
+   SUBJECTS SCREEN
+════════════════════════════════════ */
+function addSubject() {
+  const inp=document.getElementById('newSubjectInput');
+  const name=inp.value.trim();
+  if(!name) return;
+  if(data.subjects[name]){toast('Already exists!');return;}
+  data.subjects[name]={topics:{}};
+  save(); inp.value='';
+  renderSubjects();
+  openSubject(name);
+}
+document.getElementById('newSubjectInput').addEventListener('keydown',e=>{ if(e.key==='Enter') addSubject(); });
+
+function deleteSubject(name) {
+  if(!confirm(`Delete "${name}"?`)) return;
+  delete data.subjects[name]; save();
+  if(activeSubject===name) activeSubject=null;
+  renderSubjects();
+}
+
+function renderSubjects() {
+  const el=document.getElementById('subjectList');
+  const names=Object.keys(data.subjects);
+  if(!names.length){
+    el.innerHTML=`<div class="empty"><div class="e-icon">📖</div><strong>No subjects yet</strong>Add your first subject below to get started.</div>`;
+    return;
+  }
+  el.innerHTML=names.map(name=>{
+    const s=getStats(name);
+    const wD=s.total?(s.done/s.total)*100:0;
+    const wR=s.total?(s.revised/s.total)*100:0;
+    const pct=s.total?Math.round((s.done+s.revised)/s.total*100):0;
+    return `<div class="subject-card" onclick="openSubject('${esc(name)}')">
+      <div style="flex:1;min-width:0;">
+        <div class="subj-name">${h(name)}</div>
+        <div class="subj-meta">${s.done+s.revised}/${s.total} topics · ${pct}% complete</div>
+        <div class="prog-track" style="margin-top:8px">
+          <div class="prog-done"    style="width:${wD}%"></div>
+          <div class="prog-revised" style="left:${wD}%;width:${wR}%"></div>
+        </div>
+      </div>
+      <button class="subj-del" onclick="event.stopPropagation();deleteSubject('${esc(name)}')">✕</button>
+    </div>`;
+  }).join('');
+}
+
+/* ════════════════════════════════════
+   TOPICS SCREEN
+════════════════════════════════════ */
+function renderTopics() {
+  if(!activeSubject||!data.subjects[activeSubject]) return;
+  const el=document.getElementById('topicsContent');
+  const s=getStats(activeSubject);
+  const topics=data.subjects[activeSubject].topics;
+  const completed=s.done+s.revised;
+  const pct=s.total?Math.round((completed/s.total)*100):0;
+  const wD=s.total?(s.done/s.total)*100:0;
+  const wR=s.total?(s.revised/s.total)*100:0;
+  const pctD=s.total?Math.round(s.done/s.total*100):0;
+  const pctR=s.total?Math.round(s.revised/s.total*100):0;
+  const ringColor=pct<40?'var(--todo)':pct<80?'var(--warn)':'var(--done)';
+  const circ=2*Math.PI*36;
+  const off=circ-(pct/100)*circ;
+
+  const todoList   =Object.entries(topics).filter(([,t])=>!t.status||t.status==='todo');
+  const doneList   =Object.entries(topics).filter(([,t])=>t.status==='done');
+  const revisedList=Object.entries(topics).filter(([,t])=>t.status==='revised');
+
+  el.innerHTML=`
+    <!-- Header card -->
+    <div class="card" style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+      <div style="flex:1;min-width:0">
+        <div style="font-family:-apple-system,'SF Pro Display','Segoe UI',system-ui,sans-serif;font-size:1.4rem;font-weight:800;letter-spacing:-0.02em;margin-bottom:6px">${h(activeSubject)}</div>
+        <div class="pills">
+          <span class="pill pill-todo">${s.todo} to do</span>
+          <span class="pill pill-done">${s.done} done</span>
+          <span class="pill pill-revised">${s.revised} revised</span>
+        </div>
+      </div>
+      <div class="ring-wrap" style="width:80px;height:80px;flex-shrink:0">
+        <svg class="ring-svg" width="80" height="80" viewBox="0 0 80 80">
+          <circle class="ring-bg"  cx="40" cy="40" r="36"/>
+          <circle class="ring-fill" cx="40" cy="40" r="36"
+            stroke="${ringColor}" stroke-dasharray="${circ.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}"/>
+        </svg>
+        <div class="ring-lbl" style="font-size:1.15rem">${pct}%<span style="font-size:0.52rem;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase">done</span></div>
+      </div>
+    </div>
+
+    <!-- Progress bar -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+        <span style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.12em;color:var(--muted)">Syllabus Progress</span>
+        <span style="font-family:-apple-system,'SF Pro Display','Segoe UI',system-ui,sans-serif;font-size:1.3rem;font-weight:700;color:${ringColor}">${pct}%</span>
+      </div>
+      <div class="big-prog-track">
+        <div class="prog-done"    style="width:${wD}%"></div>
+        <div class="prog-revised" style="left:${wD}%;width:${wR}%"></div>
+      </div>
+      <div style="display:flex;gap:14px;margin-top:8px;flex-wrap:wrap">
+        <span style="font-size:0.68rem;color:var(--muted);display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:var(--done);display:inline-block"></span>${s.done} done (${pctD}%)</span>
+        <span style="font-size:0.68rem;color:var(--muted);display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:var(--revised);display:inline-block"></span>${s.revised} revised (${pctR}%)</span>
+        <span style="font-size:0.68rem;color:var(--muted);display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:var(--border);display:inline-block"></span>${s.todo} remaining</span>
+      </div>
+    </div>
+
+    <!-- Add topic button -->
+    <button class="btn primary lg" style="margin-bottom:20px" onclick="openAddTopicModal()">+ Add Topic</button>
+
+    <!-- Todo -->
+    <div class="topic-section">
+      <div class="topic-col-hdr todo-hdr">🔴 Yet to Do <span class="col-ct" style="color:var(--todo)">${s.todo}</span></div>
+      ${todoList.length?todoList.map(([id,t])=>topicCard(id,t,'todo')).join(''):'<div class="col-empty">All topics covered 🎉</div>'}
+    </div>
+    <!-- Done -->
+    <div class="topic-section">
+      <div class="topic-col-hdr done-hdr">🟢 Done Once <span class="col-ct" style="color:var(--done)">${s.done}</span></div>
+      ${doneList.length?doneList.map(([id,t])=>topicCard(id,t,'done')).join(''):'<div class="col-empty">None yet.</div>'}
+    </div>
+    <!-- Revised -->
+    <div class="topic-section">
+      <div class="topic-col-hdr revised-hdr">🟣 Revised <span class="col-ct" style="color:var(--revised)">${s.revised}</span></div>
+      ${revisedList.length?revisedList.map(([id,t])=>topicCard(id,t,'revised')).join(''):'<div class="col-empty">None yet.</div>'}
+    </div>
+  `;
+}
+
+function topicCard(id,topic,status){
+  return `<div class="topic-card">
+    <div class="topic-name">${h(topic.name)}</div>
+    <div class="topic-btns">
+      ${status!=='todo'    ?`<button class="t-btn" onclick="setStatus('${esc(id)}','todo')">↩ To Do</button>`:''}
+      ${status!=='done'    ?`<button class="t-btn t-done"    onclick="setStatus('${esc(id)}','done')">✓ Done</button>`:''}
+      ${status!=='revised' ?`<button class="t-btn t-revised" onclick="setStatus('${esc(id)}','revised')">★ Revised</button>`:''}
+      <button class="t-btn t-del" onclick="deleteTopic('${esc(id)}')">✕</button>
+    </div>
+  </div>`;
+}
+
+/* Add topic modal */
+function openAddTopicModal() {
+  document.getElementById('addTopicModal').classList.add('open');
+  setTimeout(()=>document.getElementById('newTopicInput').focus(),250);
+}
+function closeAddTopicModal() {
+  document.getElementById('addTopicModal').classList.remove('open');
+  document.getElementById('newTopicInput').value='';
+}
+function closeModal(e) { if(e.target===document.getElementById('addTopicModal')) closeAddTopicModal(); }
+document.getElementById('newTopicInput').addEventListener('keydown',e=>{ if(e.key==='Enter') submitTopic(); });
+
+function submitTopic(){
+  const inp=document.getElementById('newTopicInput');
+  const name=inp.value.trim();
+  if(!name||!activeSubject) return;
+  data.subjects[activeSubject].topics['t_'+Date.now()]={name,status:'todo'};
+  save(); closeAddTopicModal();
+  renderTopics(); renderSubjects();
+}
+function setStatus(id,status){
+  if(!activeSubject||!data.subjects[activeSubject].topics[id]) return;
+  data.subjects[activeSubject].topics[id].status=status;
+  save(); renderTopics(); renderSubjects();
+}
+function deleteTopic(id){
+  if(!activeSubject) return;
+  delete data.subjects[activeSubject].topics[id];
+  save(); renderTopics(); renderSubjects();
+}
+
+/* ════════════════════════════════════
    STOPWATCH — with persistence
    • Saves elapsed seconds to localStorage every tick
    • On reopen: restores elapsed time (always paused)
