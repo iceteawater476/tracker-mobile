@@ -612,22 +612,35 @@ let swSec        = 0;
 let swStartedAt  = null;
 let swTimer      = null;
 
+/* swSave stores:
+     sw_sec        = accumulated seconds (not counting current running session)
+     sw_startedAt  = timestamp when started (empty string if paused/stopped)
+   On restore: if sw_startedAt is set, we know it was running → add elapsed.
+               if empty, it was paused → just restore swSec as-is.
+   visibilitychange keeps sw_startedAt rolling so elapsed is always correct. */
+
 function swSave() {
-  localStorage.setItem('sw_sec',        String(swSec));
-  localStorage.setItem('sw_startedAt',  swRunning && swStartedAt ? String(swStartedAt) : '');
+  localStorage.setItem('sw_sec',       String(swSec));
+  localStorage.setItem('sw_startedAt', swRunning && swStartedAt ? String(swStartedAt) : '');
 }
 
 function swRestoreState() {
-  const savedSec   = parseInt(localStorage.getItem('sw_sec')       || '0', 10);
-  const savedStart = parseInt(localStorage.getItem('sw_startedAt') || '0', 10);
-  if (savedStart) {
-    // Was running when closed — add elapsed time
-    swSec = savedSec + Math.floor((Date.now() - savedStart) / 1000);
-    // Clear startedAt so a second restore doesn't double-count
+  const raw        = localStorage.getItem('sw_startedAt') || '';
+  const savedSec   = parseInt(localStorage.getItem('sw_sec') || '0', 10);
+  const savedStart = raw ? parseInt(raw, 10) : 0;
+
+  if (savedStart && !isNaN(savedStart) && savedStart > 0) {
+    // Timer was running when app closed — add elapsed, restore as PAUSED
+    const elapsed = Math.floor((Date.now() - savedStart) / 1000);
+    swSec = savedSec + elapsed;
+    // Immediately clear sw_startedAt so coming back again doesn't re-add
     localStorage.setItem('sw_startedAt', '');
+    localStorage.setItem('sw_sec', String(swSec));
   } else {
+    // Timer was paused — restore exactly as saved
     swSec = savedSec;
   }
+
   if (swSec > 0) {
     renderSW();
     if (swSec >= 5) toast('⏱ Restored — ' + fmt(swSec) + ' saved');
@@ -652,14 +665,15 @@ document.getElementById('swStartStop').onclick = function () {
     this.textContent = 'Pause';
     this.classList.remove('primary'); this.classList.add('danger');
     document.getElementById('swDisplay').classList.add('running');
-    swSave();
+    swSave(); // saves startedAt → marks it as running
   } else {
-    // PAUSE — fold running time into swSec
+    // PAUSE — fold running time into swSec, clear startedAt
     swRunning = false;
     clearInterval(swTimer); swTimer = null;
     swSec += Math.floor((Date.now() - swStartedAt) / 1000);
     swStartedAt = null;
-    renderSW(); swSave();
+    renderSW();
+    swSave(); // saves empty startedAt → marks it as paused
     this.textContent = 'Resume';
     this.classList.remove('danger'); this.classList.add('primary');
     document.getElementById('swDisplay').classList.remove('running');
@@ -670,7 +684,8 @@ document.getElementById('swReset').onclick = function () {
   swRunning = false;
   clearInterval(swTimer); swTimer = null;
   swSec = 0; swStartedAt = null;
-  renderSW(); swSave();
+  renderSW();
+  swSave(); // saves 0 and empty startedAt
   const b = document.getElementById('swStartStop');
   b.textContent = 'Start';
   b.classList.remove('danger'); b.classList.add('primary');
@@ -678,7 +693,6 @@ document.getElementById('swReset').onclick = function () {
 };
 
 function logSession() {
-  // Use live total if currently running
   const total = swRunning
     ? swSec + Math.floor((Date.now() - swStartedAt) / 1000)
     : swSec;
@@ -690,17 +704,22 @@ function logSession() {
   document.getElementById('swReset').click();
 }
 
-/* On hide/backgrounded: fold running time into swSec + update startedAt.
-   This way swRestoreState always has the latest numbers. */
+/* When app goes to background: fold elapsed into swSec and reset startedAt to NOW.
+   This ensures sw_startedAt always reflects the start of the CURRENT running window,
+   so restore can compute elapsed correctly even after multiple hide/show cycles. */
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && swRunning) {
-    const now = Date.now();
-    swSec += Math.floor((now - swStartedAt) / 1000);
-    swStartedAt = now;
-    swSave();
+  if (document.hidden) {
+    if (swRunning) {
+      const now = Date.now();
+      swSec += Math.floor((now - swStartedAt) / 1000);
+      swStartedAt = now;
+      swSave();
+    }
+    // If NOT running, do nothing — sw_startedAt is already '' from swSave()
   }
 });
-/* pagehide fires on iOS when app is backgrounded / closed */
+
+/* pagehide: same as above but for iOS PWA close/background */
 window.addEventListener('pagehide', () => {
   if (swRunning) {
     const now = Date.now();
@@ -814,9 +833,10 @@ function renderTopics() {
   const circ   = 2 * Math.PI * 36;
   const off    = circ - (pct / 100) * circ;
 
-  const todoList    = Object.entries(topics).filter(([,t]) => !t.status || t.status === 'todo');
-  const doneList    = Object.entries(topics).filter(([,t]) => t.status === 'done');
-  const revisedList = Object.entries(topics).filter(([,t]) => t.status === 'revised');
+  const byRecent = (a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0);
+  const todoList    = Object.entries(topics).filter(([,t]) => !t.status || t.status === 'todo').sort(byRecent);
+  const doneList    = Object.entries(topics).filter(([,t]) => t.status === 'done').sort(byRecent);
+  const revisedList = Object.entries(topics).filter(([,t]) => t.status === 'revised').sort(byRecent);
 
   el.innerHTML = `
     <div class="card" style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
@@ -904,6 +924,7 @@ function submitTopic() {
 function setStatus(id, status) {
   if (!activeSubject || !data.subjects[activeSubject].topics[id]) return;
   data.subjects[activeSubject].topics[id].status = status;
+  data.subjects[activeSubject].topics[id].updatedAt = Date.now();
   save(); renderTopics(); renderSubjects();
 }
 function deleteTopic(id) {
