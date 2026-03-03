@@ -502,6 +502,97 @@ input::placeholder { color:var(--muted); }
 .pc-panel { display:none; }
 .pc-panel.active { display:block; }
 
+
+/* ══════════════════════════════════════
+   GRADE GRAPH
+══════════════════════════════════════ */
+.grade-graph {
+  position: relative;
+  margin: 14px 0 4px;
+  padding-top: 20px; /* space for needle label */
+}
+.grade-graph-needle {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  z-index: 2;
+  pointer-events: none;
+}
+.grade-graph-needle-line {
+  width: 2px;
+  height: calc(100% - 18px);
+  background: var(--accent3);
+  margin: 18px auto 0;
+  border-radius: 99px;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 0;
+}
+.grade-graph-needle-label {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 0.65rem;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  position: relative;
+  left: 1px;
+}
+.grade-bar-row {
+  display: grid;
+  grid-template-columns: 44px 1fr 100px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.grade-bar-row:hover { background: rgba(255,255,255,0.03); }
+.grade-bar-current { background: rgba(106,255,212,0.05) !important; }
+.grade-bar-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  flex-shrink: 0;
+}
+.grade-bar-name { font-family:'Syne',sans-serif; font-weight:700; font-size:0.78rem; }
+.grade-bar-gpa  { font-size:0.55rem; color:var(--muted); }
+.grade-bar-track {
+  height: 14px;
+  background: var(--surface2);
+  border-radius: 99px;
+  position: relative;
+  overflow: visible;
+}
+.grade-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  position: absolute;
+  left: 0; top: 0;
+  transition: width 0.5s cubic-bezier(.4,0,.2,1);
+}
+.grade-bar-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent3);
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 2px var(--accent3);
+  z-index: 3;
+}
+.grade-bar-info {
+  font-size: 0.62rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media(min-width:768px) {
+  .grade-bar-row { grid-template-columns: 48px 1fr 120px; }
+}
+
 /* scrollbar */
 ::-webkit-scrollbar { width:4px; }
 ::-webkit-scrollbar-track { background:transparent; }
@@ -895,11 +986,13 @@ function getStats(name) {
    Rule: swStartedAt is ONLY non-zero while ACTIVELY running.
          Pause/Reset immediately sets it to 0.
 ════════════════════════════════════ */
-let swRunning   = false;
-let swAcc       = 0;
-let swStartedAt = 0;
-let swTimer     = null;
-let awayPending = 0; // seconds away that user needs to decide on
+let swRunning    = false;
+let swAcc        = 0;
+let swStartedAt  = 0;
+let swTimer      = null;
+let awayPending  = 0;  // 0 = nothing pending, -1 = waiting for return event
+let awayGoneFor  = 0;  // how many seconds elapsed while away
+let swWasRunning = false; // was running before going to background
 
 function swLive() {
   return swRunning ? swAcc + Math.floor((Date.now() - swStartedAt)/1000) : swAcc;
@@ -912,19 +1005,18 @@ function swRestoreState() {
   const acc   = parseInt(localStorage.getItem('sw_acc')       || '0', 10);
   const start = parseInt(localStorage.getItem('sw_startedAt') || '0', 10);
   if (start > 0) {
-    // Was running when closed — calculate away time
+    // App was closed while running — restore paused, show away modal
     const elapsed = Math.floor((Date.now() - start)/1000);
     swAcc = acc;
-    awayPending = elapsed;
-    // Keep running state alive — will be confirmed/discarded by user
-    swRunning   = true;
-    swStartedAt = Date.now();
-    localStorage.setItem('sw_startedAt', String(swStartedAt));
-    swTimer = setInterval(swTick, 1000);
-    updateSwBtn(true);
-    renderSW();
-    // Show away modal after short delay
-    setTimeout(() => showAwayModal(elapsed), 600);
+    localStorage.setItem('sw_startedAt', '0');
+    localStorage.setItem('sw_acc', String(swAcc));
+    renderSW(); updateSwBtn(false);
+    if (elapsed >= 5) {
+      awayGoneFor = elapsed;
+      setTimeout(() => showAwayModal(elapsed), 600);
+    } else {
+      if (swAcc >= 5) toast('⏱ Restored — '+fmt(swAcc)+' saved');
+    }
   } else {
     swAcc = acc;
     renderSW();
@@ -933,6 +1025,7 @@ function swRestoreState() {
 }
 
 function showAwayModal(secs) {
+  awayGoneFor = secs;
   document.getElementById('awayTimeDisplay').textContent = fmtFull(secs);
   document.getElementById('awayModal').classList.add('open');
 }
@@ -941,29 +1034,29 @@ function fmtFull(sec) {
   return pad(h)+':'+pad(m)+':'+pad(s);
 }
 function awayKeep() {
-  // Add away time to accumulated
-  swAcc += awayPending;
-  awayPending = 0;
+  // Add away time to accumulated, then resume
+  swAcc += awayGoneFor;
+  awayGoneFor = 0;
   document.getElementById('awayModal').classList.remove('open');
-  renderSW();
-  swSave();
+  renderSW(); swSave();
+  swResume();
 }
 function awayDiscard() {
-  // Discard — reset startedAt to now so away time is lost
-  awayPending = 0;
+  // Discard away time, resume from where we paused
+  awayGoneFor = 0;
   document.getElementById('awayModal').classList.remove('open');
-  renderSW();
-  swSave();
+  renderSW(); swSave();
+  swResume();
 }
 function awayCustom() {
   const mins = parseFloat(document.getElementById('awayCustomMins').value);
   if (isNaN(mins) || mins < 0) { toast('Enter a valid number of minutes'); return; }
   swAcc += Math.round(mins * 60);
-  awayPending = 0;
+  awayGoneFor = 0;
   document.getElementById('awayModal').classList.remove('open');
   document.getElementById('awayCustomMins').value = '';
-  renderSW();
-  swSave();
+  renderSW(); swSave();
+  swResume();
 }
 
 function renderSW() {
@@ -1011,6 +1104,13 @@ function swReset() {
   clearInterval(swTimer); swTimer=null;
   renderSW(); updateSwBtn(false); swSave();
 }
+function swResume() {
+  // Re-start the timer after returning from background
+  swRunning = true; swStartedAt = Date.now();
+  swTimer = setInterval(swTick, 1000);
+  updateSwBtn(true); swSave();
+}
+
 function swLog() {
   const total = swLive();
   if (total < 5) { toast('Start the stopwatch first!'); return; }
@@ -1021,18 +1121,40 @@ function swLog() {
   swReset();
 }
 
-/* On hide: bank elapsed, reset startedAt — only if running */
+/* On hide: pause immediately and record when we left.
+   On return: show away modal so user decides what to do with the time. */
+let _hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && swRunning) {
-    swAcc += Math.floor((Date.now()-swStartedAt)/1000);
-    swStartedAt = Date.now();
-    swSave();
+  if (document.hidden) {
+    if (swRunning) {
+      // Pause and record
+      swWasRunning = true;
+      swAcc += Math.floor((Date.now()-swStartedAt)/1000);
+      swStartedAt = 0;
+      swRunning = false;
+      clearInterval(swTimer); swTimer = null;
+      swSave();
+      updateSwBtn(false);
+      _hiddenAt = Date.now();
+    }
+  } else {
+    // Returned
+    if (swWasRunning && _hiddenAt > 0) {
+      awayGoneFor  = Math.floor((Date.now()-_hiddenAt)/1000);
+      swWasRunning = false;
+      _hiddenAt    = 0;
+      if (awayGoneFor >= 5) {
+        showAwayModal(awayGoneFor);
+      }
+      // If < 5s away, just silently stay paused — no modal needed
+    }
   }
 });
 window.addEventListener('pagehide', () => {
   if (swRunning) {
     swAcc += Math.floor((Date.now()-swStartedAt)/1000);
-    swStartedAt = Date.now();
+    swStartedAt = 0; swRunning = false;
+    clearInterval(swTimer); swTimer = null;
     swSave();
   }
 });
@@ -1375,21 +1497,43 @@ function renderGrades(prefix) {
   }
 
   el.innerHTML = ids.map(id=>{
-    const g = data.grades[id];
-    const pct    = (g.obtained/g.total)*100;
+    const g        = data.grades[id];
+    const pct      = (g.obtained/g.total)*100;
     const curGrade = getGrade(pct);
-    const col    = gradeColor(curGrade);
+    const col      = gradeColor(curGrade);
 
-    // What's needed for each higher grade
-    const tableRows = gradingSystem.map(gs=>{
-      const needed = (gs.min/100)*g.total;
-      const diff   = needed - g.obtained;
-      const isCur  = gs.grade===curGrade.grade;
-      const isNext = !isCur && gradingSystem.indexOf(gs) < gradingSystem.indexOf(curGrade);
-      const cls    = isCur?'current-grade':(isNext?'next-grade':'');
-      const diffTxt = isCur ? '← current' : (diff<=0 ? '✓ achieved' : '+'+diff.toFixed(1)+' needed');
-      return `<tr class="${cls}"><td>${gs.grade}</td><td>${gs.gpa.toFixed(2)}</td><td>${gs.min}%</td><td>${needed.toFixed(1)}</td><td>${diffTxt}</td></tr>`;
+    // Grade bar graph — each grade is a horizontal bar showing % threshold
+    // We render from highest grade (A+) to lowest (F)
+    // The bar width = that grade's min% threshold
+    // A fill marker shows where the student currently sits
+    const graphBars = gradingSystem.map((gs, i) => {
+      const isCur     = gs.grade === curGrade.grade;
+      const isAchieved= pct >= gs.min;
+      const isNext    = !isAchieved && gradingSystem[i-1] && pct >= (gradingSystem[i] ? gradingSystem[i].min : 0) - 0.01 && !isCur && gradingSystem.indexOf(gs) === gradingSystem.indexOf(curGrade) - 1;
+      const barCol    = isAchieved ? gradeColor(gs) : 'var(--border)';
+      const textCol   = isAchieved ? gradeColor(gs) : 'var(--muted)';
+      const needed    = (gs.min/100)*g.total;
+      const diff      = needed - g.obtained;
+      const label     = isCur
+        ? '← you are here'
+        : (isAchieved ? '✓' : (diff > 0 ? '+'+diff.toFixed(1)+' marks' : ''));
+      const bgOpacity = isCur ? '0.18' : (isAchieved ? '0.08' : '0.03');
+
+      return `<div class="grade-bar-row ${isCur?'grade-bar-current':''}" style="--row-col:${gradeColor(gs)}">
+        <div class="grade-bar-label" style="color:${textCol}">
+          <span class="grade-bar-name">${gs.grade}</span>
+          <span class="grade-bar-gpa">${gs.gpa.toFixed(2)}</span>
+        </div>
+        <div class="grade-bar-track">
+          <div class="grade-bar-fill" style="width:${gs.min}%;background:${barCol};opacity:${isAchieved?1:0.3}"></div>
+          ${isCur ? `<div class="grade-bar-marker" style="left:${Math.min(pct,100)}%"></div>` : ''}
+        </div>
+        <div class="grade-bar-info" style="color:${textCol}">${label}</div>
+      </div>`;
     }).join('');
+
+    // Needle line showing current %
+    const needleLeft = Math.min(pct, 100);
 
     return `<div class="grade-subject-card">
       <div class="grade-subj-header">
@@ -1397,18 +1541,20 @@ function renderGrades(prefix) {
         <div class="grade-badge" style="color:${col};border-color:${col}">${curGrade.grade} · ${curGrade.gpa.toFixed(2)}</div>
         <button class="grade-del" onclick="deleteGradeSubject('${id}')">✕</button>
       </div>
-      <div class="grade-marks">${g.obtained} / ${g.total} marks · ${pct.toFixed(1)}%</div>
-      <div class="grade-edit-row">
+      <div class="grade-marks">${g.obtained} / ${g.total} marks · <strong style="color:${col}">${pct.toFixed(1)}%</strong></div>
+
+      <div class="grade-graph">
+        <div class="grade-graph-needle" style="left:${needleLeft}%">
+          <div class="grade-graph-needle-line"></div>
+          <div class="grade-graph-needle-label" style="color:${col}">${pct.toFixed(1)}%</div>
+        </div>
+        ${graphBars}
+      </div>
+
+      <div class="grade-edit-row" style="margin-top:12px">
         <input type="number" placeholder="Update marks obtained" id="ge-obt-${id}" min="0" max="${g.total}" step="0.5" />
         <button class="btn sm primary" onclick="updateGradeMarks('${id}')">Update</button>
       </div>
-      <details style="margin-top:6px">
-        <summary style="font-size:0.7rem;color:var(--muted);cursor:pointer;margin-bottom:6px">Grade breakdown ▾</summary>
-        <table class="grade-table">
-          <tr><th>Grade</th><th>GPA</th><th>Min%</th><th>Marks needed</th><th>Status</th></tr>
-          ${tableRows}
-        </table>
-      </details>
     </div>`;
   }).join('');
 }
