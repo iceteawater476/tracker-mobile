@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finals Tracker — How to Use</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap');
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: #070810;
+  color: #e8e9f0;
+  font-family: 'DM Mono', 'Consolas', monospace;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px 20px;
+}
+
+.poster {
+  width: 900px;
+  max-width: 100%;
+  position: relative;
+}
+
+/* ── Background grid ── */
+.poster::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(124,106,255,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124,106,255,0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Glow blobs ── */
+.blob {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(120px);
+  pointer-events: none;
+  z-index: 0;
+}
+.blob-1 { width:500px;height:500px;background:rgba(124,106,255,0.12);top:-100px;left:-150px; }
+.blob-2 { width:400px;height:400px;background:rgba(106,255,212,0.07);bottom:100px;right:-100px; }
+.blob-3 { width:300px;height:300px;background:rgba(255,106,138,0.06);bottom:300px;left:100px; }
+
+.content { position: relative; z-index: 1; }
+
+/* ── Header ── */
+.header {
+  text-align: center;
+  padding: 56px 0 48px;
+  position: relative;
+}
+.logo-line {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 4rem;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+.logo-line span { color: #7c6aff; }
+.tagline {
+  font-size: 0.85rem;
+  color: #6b6e80;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  margin-bottom: 20px;
+}
+.badge-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.badge {
+  font-size: 0.62rem;
+  padding: 4px 12px;
+  border-radius: 99px;
+  border: 1px solid;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.badge-purple { border-color:#7c6aff;color:#7c6aff;background:rgba(124,106,255,0.1); }
+.badge-teal   { border-color:#6affd4;color:#6affd4;background:rgba(106,255,212,0.1); }
+.badge-pink   { border-color:#ff6a8a;color:#ff6a8a;background:rgba(255,106,138,0.1); }
+.badge-yellow { border-color:#ffb86a;color:#ffb86a;background:rgba(255,184,106,0.1); }
+
+/* ── Divider ── */
+.divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #2a2d3a, transparent);
+  margin: 0 0 48px;
+}
+
+/* ── Section label ── */
+.section-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: #7c6aff;
+  margin-bottom: 24px;
+  padding: 5px 14px;
+  border: 1px solid rgba(124,106,255,0.3);
+  border-radius: 99px;
+  background: rgba(124,106,255,0.06);
+}
+.section-tag::before { content: ''; width:6px;height:6px;border-radius:50%;background:#7c6aff;display:inline-block; }
+
+/* ── Step grid ── */
+.steps-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 48px;
+}
+
+.step-card {
+  background: #10121a;
+  border: 1px solid #1e2130;
+  border-radius: 20px;
+  padding: 28px 26px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.3s;
+}
+.step-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.3s;
+  border-radius: 20px;
+}
+.step-card:hover { border-color: var(--card-col); }
+.step-card:hover::before { opacity: 1; }
+
+.step-card.purple { --card-col:#7c6aff; }
+.step-card.purple::before { background:radial-gradient(circle at 20% 20%,rgba(124,106,255,0.08),transparent 60%); }
+.step-card.teal   { --card-col:#6affd4; }
+.step-card.teal::before   { background:radial-gradient(circle at 20% 20%,rgba(106,255,212,0.07),transparent 60%); }
+.step-card.pink   { --card-col:#ff6a8a; }
+.step-card.pink::before   { background:radial-gradient(circle at 20% 20%,rgba(255,106,138,0.07),transparent 60%); }
+.step-card.yellow { --card-col:#ffb86a; }
+.step-card.yellow::before { background:radial-gradient(circle at 20% 20%,rgba(255,184,106,0.07),transparent 60%); }
+.step-card.blue   { --card-col:#3b9eff; }
+.step-card.blue::before   { background:radial-gradient(circle at 20% 20%,rgba(59,158,255,0.07),transparent 60%); }
+.step-card.soft   { --card-col:#c084fc; }
+.step-card.soft::before   { background:radial-gradient(circle at 20% 20%,rgba(192,132,252,0.07),transparent 60%); }
+
+.step-number {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 2.8rem;
+  color: var(--card-col);
+  opacity: 0.2;
+  line-height: 1;
+  position: absolute;
+  top: 20px;
+  right: 24px;
+}
+.step-icon {
+  font-size: 1.8rem;
+  margin-bottom: 12px;
+  display: block;
+}
+.step-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 1.05rem;
+  margin-bottom: 8px;
+  color: var(--card-col);
+  letter-spacing: -0.02em;
+}
+.step-desc {
+  font-size: 0.73rem;
+  color: #8a8d9e;
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.step-bullets {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.step-bullets li {
+  font-size: 0.68rem;
+  color: #6b6e80;
+  padding-left: 14px;
+  position: relative;
+  line-height: 1.5;
+}
+.step-bullets li::before {
+  content: '›';
+  position: absolute;
+  left: 0;
+  color: var(--card-col);
+  font-weight: 700;
+}
+
+/* ── Flow section ── */
+.flow-section {
+  margin-bottom: 48px;
+}
+.flow-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.flow-node {
+  background: #10121a;
+  border: 1px solid #1e2130;
+  border-radius: 12px;
+  padding: 12px 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.flow-node .fn-icon { font-size: 1.2rem; display:block; margin-bottom:4px; }
+.flow-node .fn-label { font-size: 0.65rem; color: #6b6e80; text-transform: uppercase; letter-spacing: 0.1em; }
+.flow-node .fn-title { font-family:'Syne',sans-serif; font-weight:700; font-size:0.82rem; color:#e8e9f0; }
+.flow-arrow {
+  color: #2a2d3a;
+  font-size: 1.2rem;
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+
+/* ── Themes section ── */
+.themes-section { margin-bottom: 48px; }
+.themes-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.theme-card {
+  border-radius: 16px;
+  padding: 18px 16px;
+  border: 1px solid transparent;
+  position: relative;
+  overflow: hidden;
+}
+.theme-card.dark   { background:#0e0f13;border-color:#2a2d3a; }
+.theme-card.light  { background:#f0f2f8;border-color:#d0d5e8; }
+.theme-card.night  { background:#050508;border-color:#1e1e2e; }
+.theme-card.naval  { background:#040d1a;border-color:#0f2d50; }
+.theme-name {
+  font-family:'Syne',sans-serif;font-weight:800;font-size:0.85rem;
+  margin-bottom:4px;
+}
+.theme-card.dark  .theme-name { color:#e8e9f0; }
+.theme-card.light .theme-name { color:#1a1c2e; }
+.theme-card.night .theme-name { color:#e2e8f0; }
+.theme-card.naval .theme-name { color:#d0e8ff; }
+.theme-desc { font-size:0.6rem;margin-bottom:10px; }
+.theme-card.dark  .theme-desc { color:#6b6e80; }
+.theme-card.light .theme-desc { color:#7a7e99; }
+.theme-card.night .theme-desc { color:#64748b; }
+.theme-card.naval .theme-desc { color:#4a7099; }
+.theme-dots { display:flex;gap:5px; }
+.dot { width:10px;height:10px;border-radius:50%; }
+
+/* ── Tips section ── */
+.tips-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 48px;
+}
+.tip-card {
+  background: #10121a;
+  border: 1px solid #1e2130;
+  border-radius: 14px;
+  padding: 18px 16px;
+}
+.tip-icon { font-size:1.2rem;margin-bottom:8px;display:block; }
+.tip-text { font-size:0.68rem;color:#8a8d9e;line-height:1.6; }
+.tip-text strong { color:#e8e9f0; }
+
+/* ── Footer ── */
+.footer {
+  text-align:center;
+  padding: 32px 0 48px;
+  border-top: 1px solid #1a1c28;
+}
+.footer-logo {
+  font-family:'Syne',sans-serif;font-weight:800;font-size:1.5rem;
+  letter-spacing:-0.03em;margin-bottom:8px;
+}
+.footer-logo span { color:#7c6aff; }
+.footer-sub { font-size:0.65rem;color:#6b6e80;letter-spacing:0.15em;text-transform:uppercase; }
+
+/* ── Responsive ── */
+@media(max-width:640px){
+  .steps-grid { grid-template-columns:1fr; }
+  .themes-grid { grid-template-columns:1fr 1fr; }
+  .tips-grid { grid-template-columns:1fr; }
+  .logo-line { font-size:2.8rem; }
+  .flow-row { flex-direction:column; }
+  .flow-arrow { transform:rotate(90deg); }
+}
+</style>
+</head>
+<body>
+
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+<div class="blob blob-3"></div>
+
+<div class="poster">
+<div class="content">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="logo-line">finals<span>.</span></div>
+    <div class="tagline">Your complete study companion</div>
+    <div class="badge-row">
+      <span class="badge badge-purple">⏱ Stopwatch</span>
+      <span class="badge badge-teal">📚 Topic Tracker</span>
+      <span class="badge badge-pink">🎓 Grade Calculator</span>
+      <span class="badge badge-yellow">📅 Study Log</span>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- HOW TO USE -->
+  <div class="section-tag">How to use</div>
+
+  <div class="steps-grid">
+
+    <div class="step-card purple">
+      <div class="step-number">01</div>
+      <span class="step-icon">⏱</span>
+      <div class="step-title">Start the Stopwatch</div>
+      <div class="step-desc">Track how long you've been studying in real time. The timer keeps running even if you leave the app.</div>
+      <ul class="step-bullets">
+        <li>Hit <strong>Start</strong> when you sit down to study</li>
+        <li>Hit <strong>Pause</strong> for breaks — time stops counting</li>
+        <li>When you return, choose to <strong>keep, discard</strong> or <strong>edit</strong> the away time</li>
+        <li>Hit <strong>Log</strong> to save the session to today's record</li>
+      </ul>
+    </div>
+
+    <div class="step-card teal">
+      <div class="step-number">02</div>
+      <span class="step-icon">📅</span>
+      <div class="step-title">Log Study Time</div>
+      <div class="step-desc">Missed logging a session? Manually add study time for any past date.</div>
+      <ul class="step-bullets">
+        <li>Pick any <strong>date</strong> from the date picker</li>
+        <li>Enter <strong>hours</strong> and <strong>minutes</strong> studied</li>
+        <li>Hit <strong>Add Entry</strong> — it stacks on top of any existing time</li>
+        <li>View your full history with bar charts in the <strong>History</strong> tab</li>
+      </ul>
+    </div>
+
+    <div class="step-card pink">
+      <div class="step-number">03</div>
+      <span class="step-icon">📚</span>
+      <div class="step-title">Track Topics</div>
+      <div class="step-desc">Break each subject down into topics and track your progress through three stages.</div>
+      <ul class="step-bullets">
+        <li>Add a <strong>subject</strong> from the sidebar or Subjects tab</li>
+        <li>Add individual <strong>topics</strong> or chapters inside it</li>
+        <li>Mark each topic as <strong>Done Once</strong> or <strong>Revised</strong></li>
+        <li>Watch your <strong>progress ring</strong> fill up as you go</li>
+      </ul>
+    </div>
+
+    <div class="step-card yellow">
+      <div class="step-number">04</div>
+      <span class="step-icon">🎓</span>
+      <div class="step-title">Calculate Grades</div>
+      <div class="step-desc">See your current grade and exactly how many marks you need to reach the next one.</div>
+      <ul class="step-bullets">
+        <li>Add a subject with your <strong>marks obtained</strong> and <strong>total marks</strong></li>
+        <li>See your current <strong>grade and GPA</strong> instantly</li>
+        <li>The bar graph shows <strong>all grade zones</strong> at a glance</li>
+        <li>Update marks anytime to track your progress</li>
+      </ul>
+    </div>
+
+    <div class="step-card blue">
+      <div class="step-number">05</div>
+      <span class="step-icon">⚙️</span>
+      <div class="step-title">Customise Settings</div>
+      <div class="step-desc">Make the app yours. Change how it looks and set up your institution's grading rules.</div>
+      <ul class="step-bullets">
+        <li>Hit the <strong>⚙ button</strong> in the top-right corner</li>
+        <li>Choose from <strong>4 themes</strong>: Dark, Light, Night, Naval</li>
+        <li>Edit the <strong>minimum %</strong> for each grade to match your university</li>
+        <li>Default is the <strong>Bangladesh UGC</strong> grading system</li>
+      </ul>
+    </div>
+
+    <div class="step-card soft">
+      <div class="step-number">06</div>
+      <span class="step-icon">📊</span>
+      <div class="step-title">Review Your History</div>
+      <div class="step-desc">See your study patterns over time to stay motivated and spot gaps.</div>
+      <ul class="step-bullets">
+        <li>View <strong>this week's total</strong> and <strong>all-time hours</strong></li>
+        <li>Bar chart shows every day's study duration</li>
+        <li>Delete any entry with the <strong>✕ button</strong></li>
+        <li>Daily goal is set to <strong>8 hours</strong> — the bar fills up</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <!-- WORKFLOW FLOW -->
+  <div class="divider"></div>
+  <div class="section-tag" style="margin-top:8px">Typical study session</div>
+
+  <div class="flow-section">
+    <div class="flow-row">
+      <div class="flow-node">
+        <span class="fn-icon">🚀</span>
+        <div class="fn-label">Step 1</div>
+        <div class="fn-title">Start Timer</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node">
+        <span class="fn-icon">📚</span>
+        <div class="fn-label">Step 2</div>
+        <div class="fn-title">Study Topics</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node">
+        <span class="fn-icon">✓</span>
+        <div class="fn-label">Step 3</div>
+        <div class="fn-title">Mark Done</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node">
+        <span class="fn-icon">💾</span>
+        <div class="fn-label">Step 4</div>
+        <div class="fn-title">Log Session</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node">
+        <span class="fn-icon">🎓</span>
+        <div class="fn-label">Step 5</div>
+        <div class="fn-title">Check Grade</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- THEMES -->
+  <div class="divider"></div>
+  <div class="section-tag" style="margin-top:8px">Themes</div>
+
+  <div class="themes-section">
+    <div class="themes-grid">
+      <div class="theme-card dark">
+        <div class="theme-name">Dark</div>
+        <div class="theme-desc">Default. Deep navy with violet accents.</div>
+        <div class="theme-dots">
+          <div class="dot" style="background:#7c6aff"></div>
+          <div class="dot" style="background:#6affd4"></div>
+          <div class="dot" style="background:#ff6a8a"></div>
+        </div>
+      </div>
+      <div class="theme-card light">
+        <div class="theme-name">Light</div>
+        <div class="theme-desc">Clean white with soft blue-grey tones.</div>
+        <div class="theme-dots">
+          <div class="dot" style="background:#6357e8"></div>
+          <div class="dot" style="background:#0aad8a"></div>
+          <div class="dot" style="background:#e8335a"></div>
+        </div>
+      </div>
+      <div class="theme-card night">
+        <div class="theme-name">Night</div>
+        <div class="theme-desc">Pure black with soft purple glow.</div>
+        <div class="theme-dots">
+          <div class="dot" style="background:#c084fc"></div>
+          <div class="dot" style="background:#34d399"></div>
+          <div class="dot" style="background:#f472b6"></div>
+        </div>
+      </div>
+      <div class="theme-card naval">
+        <div class="theme-name">Naval</div>
+        <div class="theme-desc">Deep ocean blue, inspired by naval architecture.</div>
+        <div class="theme-dots">
+          <div class="dot" style="background:#3b9eff"></div>
+          <div class="dot" style="background:#00e5d4"></div>
+          <div class="dot" style="background:#ff6a3b"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIPS -->
+  <div class="divider"></div>
+  <div class="section-tag" style="margin-top:8px">Tips</div>
+
+  <div class="tips-grid">
+    <div class="tip-card">
+      <span class="tip-icon">💡</span>
+      <div class="tip-text"><strong>Works offline.</strong> All your data is stored locally in your browser. No account, no sync, no internet needed.</div>
+    </div>
+    <div class="tip-card">
+      <span class="tip-icon">📱</span>
+      <div class="tip-text"><strong>Responsive.</strong> Opens as a full app on mobile, and a sidebar layout on desktop — automatically.</div>
+    </div>
+    <div class="tip-card">
+      <span class="tip-icon">⏸</span>
+      <div class="tip-text"><strong>Away time control.</strong> If you leave mid-session, the timer pauses and asks what to do with the time when you return.</div>
+    </div>
+    <div class="tip-card">
+      <span class="tip-icon">🎓</span>
+      <div class="tip-text"><strong>Custom grading.</strong> Different university? Edit the grade thresholds in Settings to match your institution's system.</div>
+    </div>
+    <div class="tip-card">
+      <span class="tip-icon">⭐</span>
+      <div class="tip-text"><strong>Three topic stages.</strong> <strong>To Do → Done Once → Revised.</strong> Revised topics count higher toward your progress ring.</div>
+    </div>
+    <div class="tip-card">
+      <span class="tip-icon">📈</span>
+      <div class="tip-text"><strong>Retroactive logging.</strong> Forgot to log yesterday? Use the manual entry to add hours to any past date.</div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <div class="footer-logo">finals<span>.</span></div>
+    <div class="footer-sub">Study smart. Track everything.</div>
+  </div>
+
+</div>
+</div>
+</body>
+</html>
