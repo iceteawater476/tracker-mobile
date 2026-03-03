@@ -12,7 +12,7 @@
 <link id="gfonts" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap" media="print" onload="this.media='all'">
 <title>Finals Tracker</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwZTBmMTMiLz4KICA8dGV4dCB4PSIzMiIgeT0iNDIiIGZvbnQtZmFtaWx5PSJBcmlhbCBCbGFjaywgc2Fucy1zZXJpZiIgZm9udC13ZWlnaHQ9IjkwMCIgZm9udC1zaXplPSIyMCIgZmlsbD0iI2U4ZTlmMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgbGV0dGVyLXNwYWNpbmc9Ii0xIj5maW5hbHM8dHNwYW4gZmlsbD0iIzdjNmFmZiI+LjwvdHNwYW4+PC90ZXh0Pgo8L3N2Zz4=">
-<link rel="manifest" id="pwaManifest">
+<link rel="manifest" href="/manifest.json">
 
 <style>
 :root {
@@ -489,52 +489,8 @@ input::placeholder{color:var(--muted)}
 let deferredInstallPrompt = null;
 
 // Register service worker inline via blob so this works as a single file
-const SW_CODE = `
-const CACHE = 'finals-v1';
-const ASSETS = [location.href];
-self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
-  self.skipWaiting();
-});
-self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys =>
-    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-  ));
-  self.clients.claim();
-});
-self.addEventListener('fetch', e => {
-  e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request).then(res => {
-      const clone = res.clone();
-      caches.open(CACHE).then(c => c.put(e.request, clone));
-      return res;
-    }).catch(() => caches.match(e.request)))
-  );
-});
-`;
-
-// Inject manifest dynamically
-(function() {
-  const manifest = {
-    name: "Finals Tracker",
-    short_name: "finals.",
-    start_url: "./",
-    display: "standalone",
-    background_color: "#0e0f13",
-    theme_color: "#0e0f13",
-    icons: [{
-      src: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwZTBmMTMiLz4KICA8dGV4dCB4PSIzMiIgeT0iNDIiIGZvbnQtZmFtaWx5PSJBcmlhbCBCbGFjaywgc2Fucy1zZXJpZiIgZm9udC13ZWlnaHQ9IjkwMCIgZm9udC1zaXplPSIyMCIgZmlsbD0iI2U4ZTlmMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgbGV0dGVyLXNwYWNpbmc9Ii0xIj5maW5hbHM8dHNwYW4gZmlsbD0iIzdjNmFmZiI+LjwvdHNwYW4+PC90ZXh0Pgo8L3N2Zz4=",
-      sizes: "64x64", type: "image/svg+xml", purpose: "any maskable"
-    }]
-  };
-  const blob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
-  document.getElementById('pwaManifest').href = URL.createObjectURL(blob);
-})();
-
 if ('serviceWorker' in navigator) {
-  const swBlob = new Blob([SW_CODE], {type:'application/javascript'});
-  const swUrl  = URL.createObjectURL(swBlob);
-  navigator.serviceWorker.register(swUrl).catch(()=>{});
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
 window.addEventListener('beforeinstallprompt', e => {
