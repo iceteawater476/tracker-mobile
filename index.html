@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -237,6 +237,7 @@ input::placeholder{color:var(--muted)}
     <div class="logo">finals<span>.</span></div>
     <div class="hdr-right">
       <span class="hdr-date" id="hdrDate"></span>
+      <button class="settings-btn" onclick="window.open('finals-poster.html','_blank')" title="How to use" style="margin-right:4px">?</button>
       <button class="settings-btn" onclick="openSettings()" title="Settings">⚙</button>
     </div>
   </header>
@@ -490,7 +491,15 @@ let deferredInstallPrompt = null;
 
 // Register service worker inline via blob so this works as a single file
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', { scope: './' })
+      .then(reg => {
+        console.log('SW registered:', reg.scope);
+      })
+      .catch(err => {
+        console.warn('SW registration failed:', err);
+      });
+  });
 }
 
 window.addEventListener('beforeinstallprompt', e => {
@@ -545,33 +554,165 @@ function isMobile(){ return window.innerWidth<768; }
 function getStats(name){ const vals=Object.values(data.subjects[name]?.topics||{}); const total=vals.length,done=vals.filter(t=>t.status==='done').length,revised=vals.filter(t=>t.status==='revised').length; return{total,done,revised,todo:total-done-revised}; }
 function fmtFull(sec){ const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=sec%60; return pad(h)+':'+pad(m)+':'+pad(s); }
 
-/* ══════════ STOPWATCH ══════════ */
-let swRunning=false,swAcc=0,swStartedAt=0,swTimer=null,awayGoneFor=0,swWasRunning=false,_hiddenAt=0;
-function swLive(){ return swRunning ? swAcc+Math.floor((Date.now()-swStartedAt)/1000) : swAcc; }
-function swSave(){ localStorage.setItem('sw_acc',String(swAcc)); localStorage.setItem('sw_startedAt',swRunning?String(swStartedAt):'0'); }
-function swRestoreState(){
-  const acc=parseInt(localStorage.getItem('sw_acc')||'0',10);
-  const start=parseInt(localStorage.getItem('sw_startedAt')||'0',10);
-  if(start>0){ const elapsed=Math.floor((Date.now()-start)/1000); swAcc=acc; localStorage.setItem('sw_startedAt','0'); localStorage.setItem('sw_acc',String(swAcc)); renderSW(); updateSwBtn(false); if(elapsed>=5){awayGoneFor=elapsed;setTimeout(()=>showAwayModal(elapsed),600);}else if(swAcc>=5)toast('⏱ Restored — '+fmt(swAcc)+' saved'); }
-  else { swAcc=acc; renderSW(); if(swAcc>=5)toast('⏱ Restored — '+fmt(swAcc)+' saved'); }
-}
-function showAwayModal(secs){ awayGoneFor=secs; document.getElementById('awayTimeDisplay').textContent=fmtFull(secs); document.getElementById('awayModal').classList.add('open'); }
-function awayKeep(){ swAcc+=awayGoneFor; awayGoneFor=0; document.getElementById('awayModal').classList.remove('open'); renderSW(); swSave(); swResume(); }
-function awayDiscard(){ awayGoneFor=0; document.getElementById('awayModal').classList.remove('open'); renderSW(); swSave(); swResume(); }
-function awayCustom(){ const mins=parseFloat(document.getElementById('awayCustomMins').value); if(isNaN(mins)||mins<0){toast('Enter a valid number');return;} swAcc+=Math.round(mins*60); awayGoneFor=0; document.getElementById('awayModal').classList.remove('open'); document.getElementById('awayCustomMins').value=''; renderSW(); swSave(); swResume(); }
-function renderSW(){ const t=fmtFull(swLive()); document.getElementById('pcSwDisplay').textContent=t; document.getElementById('mobSwDisplay').textContent=t; const sub=swRunning?'Running…':(swAcc>0?'Paused — '+fmt(swAcc)+' banked':''); document.getElementById('pcSwSub').textContent=sub; document.getElementById('mobSwSub').textContent=sub; }
-function swTick(){ renderSW(); }
-function updateSwBtn(running){ const pb=document.getElementById('pcSwStart'),mb=document.getElementById('mobSwStart'),d1=document.getElementById('pcSwDisplay'),d2=document.getElementById('mobSwDisplay'); if(running){pb.textContent='PAUSE';pb.className='btn danger';mb.textContent='Pause';mb.className='btn danger';d1.classList.add('running');d2.classList.add('running');}else{const l=swAcc>0?'RESUME':'START';pb.textContent=l;pb.className='btn primary';mb.textContent=l==='RESUME'?'Resume':'Start';mb.className='btn primary';d1.classList.remove('running');d2.classList.remove('running');} }
-function swToggle(){ if(!swRunning){swRunning=true;swStartedAt=Date.now();swTimer=setInterval(swTick,1000);updateSwBtn(true);swSave();}else{swAcc+=Math.floor((Date.now()-swStartedAt)/1000);swStartedAt=0;swRunning=false;clearInterval(swTimer);swTimer=null;renderSW();updateSwBtn(false);swSave();} }
-function swReset(){ swRunning=false;swAcc=0;swStartedAt=0;clearInterval(swTimer);swTimer=null;renderSW();updateSwBtn(false);swSave(); }
-function swResume(){ swRunning=true;swStartedAt=Date.now();swTimer=setInterval(swTick,1000);updateSwBtn(true);swSave(); }
-function swLog(){ const total=swLive(); if(total<5){toast('Start the stopwatch first!');return;} const k=todayKey(); data.dailyLog[k]=(data.dailyLog[k]||0)+total; save();renderToday();renderHistory(); toast('✓ Logged '+fmt(total)+' to today'); swReset(); }
+/* ══════════ STOPWATCH ══════════
+   swAcc        = seconds banked while paused
+   swStartedAt  = Date.now() when last started; 0 when paused/stopped
+   Rule: swStartedAt is ONLY non-zero while ACTIVELY running.
+════════════════════════════════ */
+let swRunning    = false;
+let swAcc        = 0;
+let swStartedAt  = 0;
+let swTimer      = null;
+let awayGoneFor  = 0;
+let swWasRunning = false;
+let _hiddenAt    = 0;
 
-document.addEventListener('visibilitychange',()=>{
-  if(document.hidden){ if(swRunning){swWasRunning=true;swAcc+=Math.floor((Date.now()-swStartedAt)/1000);swStartedAt=0;swRunning=false;clearInterval(swTimer);swTimer=null;swSave();updateSwBtn(false);_hiddenAt=Date.now();} }
-  else { if(swWasRunning&&_hiddenAt>0){awayGoneFor=Math.floor((Date.now()-_hiddenAt)/1000);swWasRunning=false;_hiddenAt=0;if(awayGoneFor>=5)showAwayModal(awayGoneFor);} }
+function swLive() {
+  return swRunning ? swAcc + Math.floor((Date.now() - swStartedAt) / 1000) : swAcc;
+}
+function swSave() {
+  localStorage.setItem('sw_acc',       String(swAcc));
+  localStorage.setItem('sw_startedAt', swRunning ? String(swStartedAt) : '0');
+}
+function swRestoreState() {
+  const acc   = parseInt(localStorage.getItem('sw_acc')       || '0', 10);
+  const start = parseInt(localStorage.getItem('sw_startedAt') || '0', 10);
+  if (start > 0) {
+    // Page was closed/hidden while running — treat elapsed time as away time
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    swAcc = acc;
+    // Clear startedAt so we don't loop on next restore
+    localStorage.setItem('sw_startedAt', '0');
+    localStorage.setItem('sw_acc', String(swAcc));
+    renderSW(); updateSwBtn(false);
+    if (elapsed >= 5) {
+      awayGoneFor = elapsed;
+      setTimeout(() => showAwayModal(elapsed), 600);
+    } else if (swAcc >= 5) {
+      toast('⏱ Restored — ' + fmt(swAcc) + ' saved');
+    }
+  } else {
+    swAcc = acc;
+    renderSW();
+    if (swAcc >= 5) toast('⏱ Restored — ' + fmt(swAcc) + ' saved');
+  }
+}
+
+function showAwayModal(secs) {
+  awayGoneFor = secs;
+  document.getElementById('awayTimeDisplay').textContent = fmtFull(secs);
+  document.getElementById('awayModal').classList.add('open');
+}
+function awayKeep() {
+  swAcc += awayGoneFor;
+  awayGoneFor = 0;
+  document.getElementById('awayModal').classList.remove('open');
+  renderSW(); swSave(); swResume();
+}
+function awayDiscard() {
+  awayGoneFor = 0;
+  document.getElementById('awayModal').classList.remove('open');
+  renderSW(); swSave(); swResume();
+}
+function awayCustom() {
+  const mins = parseFloat(document.getElementById('awayCustomMins').value);
+  if (isNaN(mins) || mins < 0) { toast('Enter a valid number of minutes'); return; }
+  swAcc += Math.round(mins * 60);
+  awayGoneFor = 0;
+  document.getElementById('awayModal').classList.remove('open');
+  document.getElementById('awayCustomMins').value = '';
+  renderSW(); swSave(); swResume();
+}
+
+function renderSW() {
+  const t = fmtFull(swLive());
+  document.getElementById('pcSwDisplay').textContent  = t;
+  document.getElementById('mobSwDisplay').textContent = t;
+  const sub = swRunning ? 'Running…' : (swAcc > 0 ? 'Paused — ' + fmt(swAcc) + ' banked' : '');
+  document.getElementById('pcSwSub').textContent  = sub;
+  document.getElementById('mobSwSub').textContent = sub;
+}
+function swTick() { renderSW(); }
+
+function updateSwBtn(running) {
+  const pb = document.getElementById('pcSwStart'),  mb = document.getElementById('mobSwStart');
+  const d1 = document.getElementById('pcSwDisplay'), d2 = document.getElementById('mobSwDisplay');
+  if (running) {
+    pb.textContent = 'PAUSE'; pb.className = 'btn danger';
+    mb.textContent = 'Pause'; mb.className = 'btn danger';
+    d1.classList.add('running'); d2.classList.add('running');
+  } else {
+    const l = swAcc > 0 ? 'RESUME' : 'START';
+    pb.textContent = l;            pb.className = 'btn primary';
+    mb.textContent = l === 'RESUME' ? 'Resume' : 'Start'; mb.className = 'btn primary';
+    d1.classList.remove('running'); d2.classList.remove('running');
+  }
+}
+
+function swToggle() {
+  if (!swRunning) {
+    swRunning = true; swStartedAt = Date.now();
+    swTimer = setInterval(swTick, 1000);
+    updateSwBtn(true); swSave();
+  } else {
+    swAcc += Math.floor((Date.now() - swStartedAt) / 1000);
+    swStartedAt = 0; swRunning = false;
+    clearInterval(swTimer); swTimer = null;
+    renderSW(); updateSwBtn(false); swSave();
+  }
+}
+function swReset() {
+  swRunning = false; swAcc = 0; swStartedAt = 0; awayGoneFor = 0;
+  clearInterval(swTimer); swTimer = null;
+  renderSW(); updateSwBtn(false); swSave();
+}
+function swResume() {
+  swRunning = true; swStartedAt = Date.now();
+  swTimer = setInterval(swTick, 1000);
+  updateSwBtn(true); swSave();
+}
+function swLog() {
+  const total = swLive();
+  if (total < 5) { toast('Start the stopwatch first!'); return; }
+  const k = todayKey();
+  data.dailyLog[k] = (data.dailyLog[k] || 0) + total;
+  save(); renderToday(); renderHistory();
+  toast('✓ Logged ' + fmt(total) + ' to today');
+  swReset();
+}
+
+/* On hide: pause immediately and record when we left.
+   On return: show away modal so user decides what to do with the time. */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (swRunning) {
+      swWasRunning = true;
+      swAcc += Math.floor((Date.now() - swStartedAt) / 1000);
+      swStartedAt = 0; swRunning = false;
+      clearInterval(swTimer); swTimer = null;
+      swSave(); updateSwBtn(false);
+      _hiddenAt = Date.now();
+    }
+  } else {
+    if (swWasRunning && _hiddenAt > 0) {
+      awayGoneFor  = Math.floor((Date.now() - _hiddenAt) / 1000);
+      swWasRunning = false;
+      _hiddenAt    = 0;
+      if (awayGoneFor >= 5) showAwayModal(awayGoneFor);
+      // < 5s away: silently stay paused, no modal
+    }
+  }
 });
-window.addEventListener('pagehide',()=>{ if(swRunning){swAcc+=Math.floor((Date.now()-swStartedAt)/1000);swStartedAt=0;swRunning=false;clearInterval(swTimer);swTimer=null;swSave();} });
+
+/* Save on page close/navigate away */
+window.addEventListener('pagehide', () => {
+  if (swRunning) {
+    swAcc += Math.floor((Date.now() - swStartedAt) / 1000);
+    swStartedAt = 0; swRunning = false;
+    clearInterval(swTimer); swTimer = null;
+    swSave();
+  }
+});
 
 /* ══════════ MANUAL LOG ══════════ */
 function manualLog(p){ const dEl=document.getElementById(p+'LogDate'),hEl=document.getElementById(p+'LogHours'),mEl=document.getElementById(p+'LogMins'),dv=dEl.value,hrs=parseInt(hEl.value)||0,mins=parseInt(mEl.value)||0; if(!dv){toast('Please select a date');return;} if(hrs===0&&mins===0){toast('Enter at least 1 minute');return;} const secs=hrs*3600+mins*60; data.dailyLog[dv]=(data.dailyLog[dv]||0)+secs; save();renderToday();renderHistory(); hEl.value='';mEl.value=''; toast('✓ Added '+fmtHM(secs)+' to '+fmtDate(dv)); }
@@ -581,14 +722,144 @@ function renderToday(){ const k=todayKey(),sec=data.dailyLog[k]||0,goal=8*3600,t
 function renderHistory(){
   const today=todayKey(),all=Object.entries(data.dailyLog).sort((a,b)=>b[0].localeCompare(a[0]));
   const maxSec=all.reduce((m,[,s])=>Math.max(m,s),1),weekSec=all.slice(0,7).reduce((a,[,s])=>a+s,0),totalSec=all.reduce((a,[,s])=>a+s,0);
-  const sum=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px"><div class="card" style="text-align:center;padding:12px"><div style="font-family:'Syne','Trebuchet MS','Gill Sans',system-ui,sans-serif;font-size:1.3rem;font-weight:700;color:var(--accent)">${fmtHM(weekSec)||'0m'}</div><div style="font-size:.62rem;color:var(--muted);margin-top:2px">This week</div></div><div class="card" style="text-align:center;padding:12px"><div style="font-family:'Syne','Trebuchet MS','Gill Sans',system-ui,sans-serif;font-size:1.3rem;font-weight:700;color:var(--accent3)">${fmtHM(totalSec)||'0m'}</div><div style="font-size:.62rem;color:var(--muted);margin-top:2px">All time</div></div></div>`;
-  if(!all.length){const e=sum+'<div class="empty-msg"><span class="e-ico">📅</span>No sessions logged yet.</div>';['pcHistoryContent','pcHistoryFullContent','mobHistoryContent'].forEach(id=>document.getElementById(id).innerHTML=e);return;}
-  const rows=all.map(([key,sec])=>{const isT=key===today,pct=Math.max(4,Math.round((sec/maxSec)*100)),col=isT?'var(--accent)':'var(--accent3)';return`<div class="hist-card"><div class="hist-date ${isT?'today':''}">${fmtDate(key)}</div><div class="hist-bar-track"><div class="hist-bar-fill" style="width:${pct}%;background:${col}"></div></div><div style="display:flex;align-items:center;gap:6px"><span class="hist-time">${fmtHM(sec)}</span><button class="hist-del" onclick="deleteLogEntry('${key}')" title="Delete">✕</button></div></div>`;}).join('');
-  const full=sum+rows;
-  document.getElementById('pcHistoryContent').innerHTML=sum+rows;
+  const avgSec=all.length?Math.round(totalSec/all.length):0;
+
+  const sum=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+    <div class="card" style="text-align:center;padding:12px">
+      <div style="font-family:'Syne','Trebuchet MS','Gill Sans',system-ui,sans-serif;font-size:1.2rem;font-weight:700;color:var(--accent)">${fmtHM(weekSec)||'0m'}</div>
+      <div style="font-size:.6rem;color:var(--muted);margin-top:2px">This week</div>
+    </div>
+    <div class="card" style="text-align:center;padding:12px">
+      <div style="font-family:'Syne','Trebuchet MS','Gill Sans',system-ui,sans-serif;font-size:1.2rem;font-weight:700;color:var(--accent3)">${fmtHM(totalSec)||'0m'}</div>
+      <div style="font-size:.6rem;color:var(--muted);margin-top:2px">All time</div>
+    </div>
+    <div class="card" style="text-align:center;padding:12px">
+      <div style="font-family:'Syne','Trebuchet MS','Gill Sans',system-ui,sans-serif;font-size:1.2rem;font-weight:700;color:var(--warn)">${fmtHM(avgSec)||'0m'}</div>
+      <div style="font-size:.6rem;color:var(--muted);margin-top:2px">Daily avg</div>
+    </div>
+  </div>`;
+
+  if(!all.length){
+    const e=sum+'<div class="empty-msg"><span class="e-ico">📅</span>No sessions logged yet.</div>';
+    ['pcHistoryContent','pcHistoryFullContent','mobHistoryContent'].forEach(id=>document.getElementById(id).innerHTML=e);
+    return;
+  }
+
+  // Build last-7-days chart (always show 7 days even if no data)
+  const chartHTML = buildChart(today);
+
+  const rows=all.map(([key,sec])=>{
+    const isT=key===today,pct=Math.max(4,Math.round((sec/maxSec)*100)),col=isT?'var(--accent)':'var(--accent3)';
+    return`<div class="hist-card"><div class="hist-date ${isT?'today':''}">${fmtDate(key)}</div><div class="hist-bar-track"><div class="hist-bar-fill" style="width:${pct}%;background:${col}"></div></div><div style="display:flex;align-items:center;gap:6px"><span class="hist-time">${fmtHM(sec)}</span><button class="hist-del" onclick="deleteLogEntry('${key}')" title="Delete">✕</button></div></div>`;
+  }).join('');
+
+  const full=sum+chartHTML+rows;
+  document.getElementById('pcHistoryContent').innerHTML=sum+chartHTML+rows;
   document.getElementById('pcHistoryFullContent').innerHTML=full;
   document.getElementById('mobHistoryContent').innerHTML=full;
 }
+
+function buildChart(today) {
+  // Collect last 7 days (oldest→newest so chart reads left→right)
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const key = d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+    const sec = data.dailyLog[key] || 0;
+    const label = i===0 ? 'Today' : d.toLocaleDateString('en-US',{weekday:'short'});
+    days.push({ key, sec, label, isToday: i===0 });
+  }
+
+  const maxSec  = Math.max(...days.map(d=>d.sec), 1);
+  const avgSec  = days.reduce((a,d)=>a+d.sec,0) / 7;
+  const avgPct  = (avgSec / maxSec) * 100;
+
+  // SVG dimensions
+  const W=500, H=160, PL=44, PR=16, PT=20, PB=28;
+  const cW=W-PL-PR, cH=H-PT-PB;
+  const n=days.length;
+  const xStep = cW/(n-1);
+
+  // Y-axis labels (0, half, max) in hours
+  const maxH=(maxSec/3600);
+  const yLabels=[
+    {val:0,    y:PT+cH},
+    {val:maxH/2, y:PT+cH/2},
+    {val:maxH,   y:PT},
+  ];
+
+  // Build polyline points for the trend line
+  const pts = days.map((d,i)=>{
+    const x = PL + i*xStep;
+    const y = PT + cH - (d.sec/maxSec)*cH;
+    return {x,y,d};
+  });
+  const polyline = pts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+
+  // Filled area under line
+  const areaPath = `M${pts[0].x.toFixed(1)},${(PT+cH).toFixed(1)} `
+    + pts.map(p=>`L${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
+    + ` L${pts[n-1].x.toFixed(1)},${(PT+cH).toFixed(1)} Z`;
+
+  // Average line Y
+  const avgY = PT + cH - (avgSec/maxSec)*cH;
+
+  // Trend line (linear regression)
+  const xs=pts.map((_,i)=>i), ys=pts.map(p=>p.d.sec);
+  const mx=xs.reduce((a,v)=>a+v,0)/n, my=ys.reduce((a,v)=>a+v,0)/n;
+  const num=xs.reduce((a,v,i)=>a+(v-mx)*(ys[i]-my),0);
+  const den=xs.reduce((a,v)=>a+(v-mx)**2,0);
+  const slope=den?num/den:0, intercept=my-slope*mx;
+  const tY0=PT+cH-(Math.max(0,intercept)/maxSec)*cH;
+  const tY1=PT+cH-(Math.max(0,slope*(n-1)+intercept)/maxSec)*cH;
+
+  // Grid lines
+  const gridLines = yLabels.map(g=>`<line x1="${PL}" y1="${g.y.toFixed(1)}" x2="${W-PR}" y2="${g.y.toFixed(1)}" stroke="var(--border)" stroke-width="1" stroke-dasharray="4,4"/>`).join('');
+
+  // Y axis labels
+  const yAxisLabels = yLabels.map(g=>`<text x="${PL-6}" y="${(g.y+4).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--muted)">${g.val<0.1&&g.val>0?'':g.val.toFixed(g.val>=10?0:1)}h</text>`).join('');
+
+  // X axis labels + dot per day
+  const xLabels = pts.map(p=>`
+    <text x="${p.x.toFixed(1)}" y="${(H-4).toFixed(1)}" text-anchor="middle" font-size="9" fill="${p.d.isToday?'var(--accent)':'var(--muted)'}">${p.d.label}</text>
+    ${p.d.sec>0?`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="${p.d.isToday?'var(--accent)':'var(--accent3)'}" stroke="var(--bg)" stroke-width="2"/>
+    <text x="${p.x.toFixed(1)}" y="${(p.y-9).toFixed(1)}" text-anchor="middle" font-size="8" fill="${p.d.isToday?'var(--accent)':'var(--accent3)'}">${fmtHM(p.d.sec)}</text>`:''}
+  `).join('');
+
+  const svg=`<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible">
+    ${gridLines}
+    ${yAxisLabels}
+    <!-- area fill -->
+    <path d="${areaPath}" fill="var(--accent3)" opacity="0.07"/>
+    <!-- trend regression line -->
+    <line x1="${pts[0].x.toFixed(1)}" y1="${tY0.toFixed(1)}" x2="${pts[n-1].x.toFixed(1)}" y2="${tY1.toFixed(1)}"
+      stroke="var(--accent2)" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.6"/>
+    <!-- avg line -->
+    <line x1="${PL}" y1="${avgY.toFixed(1)}" x2="${W-PR}" y2="${avgY.toFixed(1)}"
+      stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.8"/>
+    <text x="${(W-PR+2).toFixed(1)}" y="${(avgY+4).toFixed(1)}" font-size="8" fill="var(--warn)" opacity="0.9">avg</text>
+    <!-- main line -->
+    <polyline points="${polyline}" fill="none" stroke="var(--accent3)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    ${xLabels}
+  </svg>`;
+
+  // Legend
+  const trendDir = slope > 0 ? '↑ Trending up' : slope < 0 ? '↓ Trending down' : '→ Flat';
+  const trendCol = slope > 0 ? 'var(--done)' : slope < 0 ? 'var(--todo)' : 'var(--muted)';
+
+  return `<div class="card" style="margin-bottom:12px;padding:14px 14px 10px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)">Last 7 Days</div>
+      <div style="display:flex;gap:12px;font-size:.6rem;align-items:center">
+        <span style="color:var(--accent3)">● Study time</span>
+        <span style="color:var(--warn)">— Avg (${fmtHM(avgSec)||'0m'})</span>
+        <span style="color:${trendCol}">${trendDir}</span>
+      </div>
+    </div>
+    <div style="overflow-x:auto">${svg}</div>
+  </div>`;
+}
+
 function deleteLogEntry(key){ if(!confirm('Delete entry for '+fmtDate(key)+'?'))return; delete data.dailyLog[key];save();renderToday();renderHistory(); }
 
 /* ══════════ NAV ══════════ */
